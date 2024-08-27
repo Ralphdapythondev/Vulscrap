@@ -5,7 +5,7 @@
 
 ## Introduction
 
-The **Multi-Source Vulnerability Scraper** is a Python-based web scraping tool built with Streamlit. It is designed to extract and process vulnerability data from various sources, providing real-time updates, visualization, and data export features. This tool integrates advanced functionalities like logging, retry mechanisms, asynchronous processing, database storage, and email notifications.
+The **VulnWatch Sentinel** is a Python-based web scraping tool built with Streamlit. It is designed to extract and process vulnerability data from various sources, providing real-time updates, visualization, and data export features. This tool integrates advanced functionalities like logging, retry mechanisms, asynchronous processing, database storage, and email notifications.
 
 ## Key Features
 
