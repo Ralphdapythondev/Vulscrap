@@ -5,6 +5,8 @@ import csv
 import requests
 import concurrent.futures
 import json
+from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
 
 URLS = {
     "CISA IT": "https://www.cisa.gov/news-events/bulletins/sb23-100",
@@ -14,12 +16,20 @@ OUTPUT_FILE = "vulnerabilities.csv"
 
 def extract_vulnerabilities(url, source):
     try:
-        response = requests.get(url)
-        response.raise_for_status()
         vulnerabilities = []
-
+        
         if source.startswith("CISA"):
-            soup = BeautifulSoup(response.content, "html.parser")
+            # Use Playwright with stealth to scrape the CISA website
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(headless=True)
+                context = browser.new_context()
+                page = context.new_page()
+
+                stealth_sync(page)  # Apply stealth to the page
+                page.goto(url)
+                content = page.content()
+
+            soup = BeautifulSoup(content, "html.parser")
             table = soup.find("table")
             if table:
                 rows = table.find_all("tr")[1:]
@@ -38,6 +48,8 @@ def extract_vulnerabilities(url, source):
                     }
                     vulnerabilities.append(vulnerability)
         elif source == "NVD":
+            response = requests.get(url)
+            response.raise_for_status()
             data = response.json()
             for vuln in data.get('vulnerabilities', []):
                 cve = vuln['cve']
