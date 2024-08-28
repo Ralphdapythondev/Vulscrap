@@ -2,13 +2,14 @@ import logging
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-import asyncio
-import aiohttp
 import streamlit as st
 import pandas as pd
 import sqlite3
 import smtplib
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from bs4 import BeautifulSoup
 import concurrent.futures
 import plotly.express as px
@@ -92,23 +93,50 @@ def extract_vulnerabilities(url, source):
         return []
 
 def save_to_database(vulnerabilities, db_name=DB_NAME):
-    conn = sqlite3.connect(db_name)
-    df = pd.DataFrame(vulnerabilities)
-    df.to_sql('vulnerabilities', conn, if_exists='append', index=False)
-    conn.close()
-
-def send_email_notification(vulnerabilities):
     try:
-        msg = MIMEText("New vulnerabilities found!")
+        conn = sqlite3.connect(db_name)
+        df = pd.DataFrame(vulnerabilities)
+        df.to_sql('vulnerabilities', conn, if_exists='append', index=False)
+        logging.info(f"Data saved to database {db_name}")
+    except Exception as e:
+        logging.error(f"Failed to save to database: {e}")
+    finally:
+        conn.close()
+
+def save_to_csv(vulnerabilities, file_path=OUTPUT_FILE):
+    try:
+        df = pd.DataFrame(vulnerabilities)
+        df.to_csv(file_path, index=False)
+        logging.info(f"Vulnerabilities saved to {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to save CSV: {e}")
+
+def send_email_notification(vulnerabilities, file_path, recipient_email):
+    try:
+        msg = MIMEMultipart()
         msg['Subject'] = 'Vulnerability Alert'
         msg['From'] = 'your-email@example.com'
-        msg['To'] = 'recipient@example.com'
+        msg['To'] = recipient_email
+
+        body = MIMEText(f"New vulnerabilities found! Check the attached CSV file for details.", 'plain')
+        msg.attach(body)
+
+        # Attach the CSV file
+        with open(file_path, "rb") as attachment:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition",
+                f"attachment; filename= {file_path}",
+            )
+            msg.attach(part)
 
         with smtplib.SMTP('smtp.example.com') as server:
             server.login("username", "password")
             server.sendmail(msg['From'], [msg['To']], msg.as_string())
 
-        logging.info("Email notification sent successfully")
+        logging.info("Email notification sent successfully with CSV attachment")
     except Exception as e:
         logging.error(f"Failed to send email: {e}")
 
@@ -117,7 +145,7 @@ def plot_vulnerabilities(data):
     st.plotly_chart(fig)
 
 def format_vulnerabilities(vulnerabilities):
-    return pd.DataFrame([
+    df = pd.DataFrame([
         {
             "CVE ID": vuln.get("cve", "N/A"),
             "Product": vuln.get("product", "N/A"),
@@ -130,12 +158,17 @@ def format_vulnerabilities(vulnerabilities):
         }
         for vuln in vulnerabilities
     ])
+   
+    # Convert all numeric columns to string to prevent serialization issues
+    df['CVSS Score'] = df['CVSS Score'].astype(str)
+   
+    return df
 
 def main():
-    st.set_page_config(page_title="Multi-Source Vulnerability Scraper", layout="wide")
-    st.title("🚨 Multi-Source Vulnerability Scraper Tool")
+    st.set_page_config(page_title="VulnWatch Sentinel", layout="wide")
+    st.title("VulnWatch Sentinel")
     st.write("This tool scrapes vulnerabilities from multiple sources and provides real-time updates.")
-    
+   
     st.sidebar.header("Settings")
     st.sidebar.write("Select the sources you want to scrape vulnerabilities from:")
     selected_sources = st.sidebar.multiselect(
@@ -144,13 +177,20 @@ def main():
         default=list(URLS.keys())
     )
 
+    # Add email input field
+    email = st.sidebar.text_input("Enter your email address", placeholder="you@example.com")
+
     st.sidebar.write("Click the button to start scraping.")
     if st.sidebar.button("Start Scraping"):
+        if not email:
+            st.error("Please enter a valid email address.")
+            return
+       
         progress_bar = st.progress(0)
         status_text = st.empty()
-        
+       
         source_vulnerabilities = {}
-        
+       
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_to_source = {executor.submit(extract_vulnerabilities, URLS[source], source): source for source in selected_sources}
 
@@ -163,14 +203,17 @@ def main():
                 except Exception as exc:
                     st.error(f"{source} generated an exception: {exc}")
                     logging.error(f"{source} generated an exception: {exc}")
-                
+               
                 progress = (i + 1) / len(selected_sources)
                 progress_bar.progress(progress)
-        
+       
         all_vulnerabilities = [vuln for vulns in source_vulnerabilities.values() for vuln in vulns]
         save_to_database(all_vulnerabilities)
-        send_email_notification(all_vulnerabilities)
-        
+        save_to_csv(all_vulnerabilities, OUTPUT_FILE)
+       
+        # Send an email with the extracted vulnerabilities
+        send_email_notification(all_vulnerabilities, OUTPUT_FILE, email)
+       
         if all_vulnerabilities:
             st.success(f"Vulnerabilities scraped and saved to {OUTPUT_FILE}")
             st.write("### Extracted Vulnerabilities")
@@ -182,7 +225,7 @@ def main():
                     plot_vulnerabilities(df)
                 else:
                     st.warning(f"No vulnerabilities found for {source}.")
-            
+           
             st.download_button(
                 label="Download CSV",
                 data=pd.DataFrame(all_vulnerabilities).to_csv(index=False).encode('utf-8'),
