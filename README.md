@@ -1,6 +1,3 @@
-Here’s the updated `.md` file content for your project:
-
----
 
 # VulnWatch Sentinel
 
