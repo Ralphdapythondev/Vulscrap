@@ -12,6 +12,7 @@ from email import encoders
 from bs4 import BeautifulSoup
 import concurrent.futures
 import plotly.express as px
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
